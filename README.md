@@ -37,6 +37,11 @@
   --bottomh: 118px;   /* ambas las recalcula measureChrome() */
   --topbarh: 58px;
   --kb: 0px;
+  /* Área realmente visible. En iOS, vh ignora el teclado: por eso los
+     sheets se medían más altos que la pantalla y su parte superior
+     (con el campo enfocado) quedaba fuera de vista. */
+  --vvh: 100vh;
+  --vvtop: 0px;
   color-scheme: dark;
 }
 :root[data-theme="light"]{
@@ -203,15 +208,21 @@ textarea.t{resize:vertical;min-height:76px;line-height:1.4}
 .toast.plain{background:var(--card-2);color:var(--fg)}
 /* Con el teclado abierto no compiten por el mismo espacio. */
 body.kb .bottom,body.kb .fabwrap{display:none}
+/* overflow:hidden no basta en iOS: el documento sigue desplazándose para
+   revelar el campo enfocado y arrastra los elementos fijos fuera de vista. */
+body.locked{position:fixed;left:0;right:0;width:100%;overflow:hidden}
 
 /* ---------- sheets y diálogos ---------- */
-.scrim{position:fixed;top:0;left:0;right:0;bottom:var(--kb);background:rgba(0,0,0,.6);z-index:60;
-  display:flex;align-items:flex-end;justify-content:center}
+/* El scrim se ancla al viewport VISIBLE (alto y desplazamiento reales),
+   no al de la página: así la hoja siempre cabe entre el borde superior
+   y el teclado, en lugar de desbordarse hacia arriba. */
+.scrim{position:fixed;left:0;right:0;top:var(--vvtop);height:var(--vvh);background:rgba(0,0,0,.6);
+  z-index:60;display:flex;align-items:flex-end;justify-content:center}
 .scrim.center{align-items:center;padding:20px}
-.sheet{background:var(--bg);width:100%;max-width:560px;border-radius:22px 22px 0 0;max-height:86vh;
+.sheet{background:var(--bg);width:100%;max-width:560px;border-radius:22px 22px 0 0;max-height:100%;
   overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;
   padding:14px 16px calc(24px + var(--safe-b));animation:up .22s ease-out}
-.sheet.dialog{border-radius:20px;max-width:400px;padding:20px;animation:none;max-height:82vh}
+.sheet.dialog{border-radius:20px;max-width:400px;padding:20px;animation:none;max-height:100%}
 @keyframes up{from{transform:translateY(18px);opacity:.5}to{transform:none;opacity:1}}
 .grab{width:38px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 14px;flex:none}
 .sheet h3{font-size:19px;font-weight:800;margin-bottom:14px}
@@ -956,10 +967,34 @@ function scrollIntoViewSafe(el, opts){
   try{ el.scrollIntoView(opts); }catch(e){ try{ el.scrollIntoView(); }catch(e2){} }
 }
 
-function closeLayer(){ $('#layer').innerHTML = ''; lockScroll(false); }
+function closeLayer(){
+  // Cerrar el teclado antes de desmontar evita que iOS deje la página
+  // desplazada en una posición imposible.
+  const el = document.activeElement;
+  if(el && typeof el.blur === 'function') el.blur();
+  $('#layer').innerHTML = '';
+  lockScroll(false);
+}
 
-/* Con un sheet abierto, el fondo no debe desplazarse detrás. */
-function lockScroll(on){ document.body.style.overflow = on ? 'hidden' : ''; }
+/* Con un sheet abierto el fondo se congela. En iOS no basta con
+   overflow:hidden: hay que fijar el body y devolverlo a su sitio al cerrar,
+   porque si no el navegador desplaza el documento para revelar el campo
+   enfocado y se lleva por delante todo lo posicionado en fixed. */
+let lockedY = 0;
+function lockScroll(on){
+  const b = document.body;
+  if(on){
+    if(b.classList.contains('locked')) return;
+    lockedY = window.scrollY || window.pageYOffset || 0;
+    b.style.top = (-lockedY) + 'px';
+    b.classList.add('locked');
+  } else {
+    if(!b.classList.contains('locked')) return;
+    b.classList.remove('locked');
+    b.style.top = '';
+    window.scrollTo(0, lockedY);
+  }
+}
 
 function sheet(html, opts={}){
   $('#layer').innerHTML =
@@ -992,7 +1027,8 @@ function confirmDialog(title, message, confirmLabel='Confirmar'){
 function promptDialog(title, value='', opts={}){
   return new Promise(resolve => {
     dialog(`<h3>${esc(title)}</h3>
-      <input class="t" id="dlg-in" value="${esc(value)}" placeholder="${esc(opts.hint||'')}"
+      <input class="t" id="dlg-in" name="campo" value="${esc(value)}" placeholder="${esc(opts.hint||'')}"
+        autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="done"
         ${opts.numeric ? 'inputmode="decimal"' : ''} style="margin-bottom:16px">
       <div class="row" style="gap:10px">
         <button class="btn ghost" id="dlg-no">Cancelar</button>
@@ -1028,7 +1064,8 @@ function pickExercise(onPick){
       : '<p class="muted small" style="padding:14px 4px">Sin resultados. Puedes crear uno nuevo en Más → Ejercicios.</p>';
   };
   sheet(`<h3>Elegir ejercicio</h3>
-    <input class="t" id="pick-search" placeholder="Buscar…" autocomplete="off" style="margin-bottom:12px">
+    <input class="t" id="pick-search" name="buscar" placeholder="Buscar…" autocomplete="off"
+      autocorrect="off" spellcheck="false" enterkeyhint="search" style="margin-bottom:12px">
     <div id="pick-list">${rowsFor('')}</div>`);
   const search = $('#pick-search');
   search.oninput = () => { $('#pick-list').innerHTML = rowsFor(search.value); };
@@ -1050,7 +1087,8 @@ function stepper(id, label, value, o={}){
     <div class="body">
       <button class="rnd" data-act="step" data-t="${id}" data-d="${-step}" data-min="${min}" data-max="${max}">−</button>
       <input id="${id}" inputmode="${decimals?'decimal':'numeric'}" value="${num(value)}"
-             data-min="${min}" data-max="${max}">
+             data-min="${min}" data-max="${max}" autocomplete="off" autocorrect="off"
+             spellcheck="false" enterkeyhint="done">
       ${unit ? `<span class="unit">${esc(unit)}</span>` : ''}
       <button class="rnd" data-act="step" data-t="${id}" data-d="${step}" data-min="${min}" data-max="${max}">+</button>
     </div></div>`;
@@ -1422,7 +1460,9 @@ function screenExercises(){
   const list = ExerciseRepo.all(state.exSearch, state.exGroup);
   return `<div class="topbar"><button class="iconbtn" data-act="back">←</button><h1>Ejercicios</h1></div>
   <div style="padding:0 16px 10px">
-    <input class="t" id="ex-search" placeholder="Buscar ejercicio" value="${esc(state.exSearch)}"></div>
+    <input class="t" id="ex-search" name="buscar-ejercicio" placeholder="Buscar ejercicio"
+      value="${esc(state.exSearch)}" autocomplete="off" autocorrect="off" spellcheck="false"
+      enterkeyhint="search"></div>
   <div class="hscroll" style="padding-bottom:10px">${
     ['Todos',...MUSCLES].map(g => `<button class="pill${state.exGroup===g?' on':''}"
       data-act="ex-group" data-v="${esc(g)}">${g}</button>`).join('')}</div>
@@ -1676,18 +1716,42 @@ if(window.ResizeObserver){
 if(window.visualViewport){
   const vv = window.visualViewport;
   const onViewport = () => {
+    const root = document.documentElement.style;
     const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-    document.documentElement.style.setProperty('--kb', Math.round(kb) + 'px');
+    // Alto y desplazamiento del área visible: con estos dos valores los
+    // sheets se dibujan exactamente donde el usuario está mirando.
+    root.setProperty('--vvh', Math.round(vv.height) + 'px');
+    root.setProperty('--vvtop', Math.round(vv.offsetTop) + 'px');
+    root.setProperty('--kb', Math.round(kb) + 'px');
     document.body.classList.toggle('kb', kb > 120);
     measureChrome();
   };
   vv.addEventListener('resize', onViewport);
   vv.addEventListener('scroll', onViewport);
+  window.addEventListener('orientationchange', () => setTimeout(onViewport, 300));
+  onViewport();
+
+  /* Al enfocar un campo, dejarlo a la vista DENTRO del sheet. El teclado
+     tarda en aparecer, así que se reintenta un par de veces. */
+  document.addEventListener('focusin', ev => {
+    const field = ev.target;
+    if(!field || !/^(INPUT|TEXTAREA|SELECT)$/.test(field.tagName)) return;
+    [120, 350].forEach(delay => setTimeout(() => {
+      if(document.activeElement === field) scrollIntoViewSafe(field, {block:'center'});
+    }, delay));
+  });
 } else {
-  // Navegadores antiguos: nos basta con saber si hay un campo enfocado.
+  // Navegadores antiguos: sin visualViewport nos apoyamos en el foco.
+  const syncHeight = () =>
+    document.documentElement.style.setProperty('--vvh', window.innerHeight + 'px');
+  syncHeight();
+  window.addEventListener('resize', syncHeight);
   const isField = el => el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName);
   document.addEventListener('focusin', e => {
-    if(isField(e.target)){ document.body.classList.add('kb'); measureChrome(); }
+    if(isField(e.target)){
+      document.body.classList.add('kb'); measureChrome();
+      setTimeout(() => scrollIntoViewSafe(e.target, {block:'center'}), 250);
+    }
   });
   document.addEventListener('focusout', () => {
     setTimeout(() => {
@@ -2118,12 +2182,14 @@ function exerciseFormSheet(id){
     options.map(o => `<option${o===value?' selected':''}>${o}</option>`).join('')}</select>`;
   sheet(`<h3>${e ? 'Editar ejercicio' : 'Nuevo ejercicio'}</h3>
     <label class="f"><span>Nombre</span>
-      <input class="t" id="exf-name" value="${esc(e?.name || '')}" placeholder="Ej. Press Hammer máquina"></label>
+      <input class="t" id="exf-name" name="exercise-name" value="${esc(e?.name || '')}"
+        placeholder="Ej. Press Hammer máquina" autocomplete="off" autocorrect="off"
+        autocapitalize="sentences" spellcheck="false" enterkeyhint="done"></label>
     <label class="f"><span>Grupo muscular</span>${sel('exf-group', MUSCLES, e?.muscle_group)}</label>
     <label class="f"><span>Equipo</span>${sel('exf-equip', EQUIPMENT, e?.equipment)}</label>
     <label class="f"><span>Tipo</span>${sel('exf-type', EXTYPES, e?.type)}</label>
     <label class="f"><span>Descripción</span>
-      <input class="t" id="exf-desc" value="${esc(e?.description || '')}"></label>
+      <input class="t" id="exf-desc" value="${esc(e?.description || '')}" autocomplete="off"></label>
     <label class="f"><span>Instrucciones</span>
       <textarea class="t" id="exf-inst">${esc(e?.instructions || '')}</textarea></label>
     <button class="btn" data-act="save-exercise" ${e?`data-v="${e.id}"`:''}>GUARDAR</button>`,
