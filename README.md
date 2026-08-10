@@ -2,18 +2,25 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0E1113">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="format-detection" content="telephone=no">
 <title>Gym Tracker</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230E1113'/><text y='72' x='50' font-size='58' text-anchor='middle' fill='%23C6FF3D' font-family='sans-serif' font-weight='bold'>G</text></svg>">
 <style>
 /* ============================================================
    Identidad: sala de pesas. Casi negro, un solo acento lima,
    números pesados y tabulares. Sin fuentes externas: la app
-   tiene que verse igual sin conexión.
+   debe verse igual sin conexión.
+
+   Reglas de layout que evitan solapamientos:
+   --bottomh  = altura REAL medida de la barra inferior
+                (nav + temporizador + botón finalizar).
+   --kb       = altura del teclado en pantalla (visualViewport).
+   Todo lo flotante se ancla a --bottomh, nunca a píxeles fijos.
    ============================================================ */
 :root{
   --accent:#C6FF3D; --on-accent:#101214;
@@ -21,130 +28,195 @@
   --fg:#EDF1F2; --muted:#8B9499; --line:#2A3036;
   --danger:#FF6B6B; --radius:18px;
   --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --chip-bg:#242A2F; --chip-fg:#8B9499;
+  --accent-soft:rgba(198,255,61,.16); --accent-soft2:rgba(198,255,61,.22);
+  --accent-line:rgba(198,255,61,.55); --accent-line2:rgba(198,255,61,.34);
+  --accent-timer:#1B2318; --danger-soft:rgba(255,107,107,.14); --danger-line:rgba(255,107,107,.42);
+  --bottomh: 118px;   /* ambas las recalcula measureChrome() */
+  --topbarh: 58px;
+  --kb: 0px;
+  color-scheme: dark;
 }
 :root[data-theme="light"]{
   --accent:#4C6B00; --on-accent:#FFFFFF;
   --bg:#F3F5F0; --card:#FFFFFF; --card-2:#EDEFEA;
-  --fg:#151815; --muted:#6B7280; --line:#E0E3DC;
+  --fg:#151815; --muted:#66706B; --line:#DFE3DB;
+  --chip-bg:#E7EAE2; --chip-fg:#5C665F;
+  --accent-soft:rgba(76,107,0,.13); --accent-soft2:rgba(76,107,0,.20);
+  --accent-line:rgba(76,107,0,.55); --accent-line2:rgba(76,107,0,.32);
+  --accent-timer:#F0F4E6; --danger-soft:rgba(197,48,48,.12); --danger-line:rgba(197,48,48,.38);
+  color-scheme: light;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;padding:0;height:100%}
+html,body{margin:0;padding:0;min-height:100%}
 body{
   background:var(--bg); color:var(--fg);
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
-  font-size:15px; line-height:1.45; overscroll-behavior-y:contain;
-  -webkit-font-smoothing:antialiased;
+  font-size:15px; line-height:1.45;
+  overscroll-behavior-y:none; touch-action:manipulation;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+  padding-left:var(--safe-l); padding-right:var(--safe-r);
 }
-#app{max-width:560px;margin:0 auto;min-height:100%;position:relative}
-button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
-button{background:none;border:0;cursor:pointer}
-h1,h2,h3{margin:0;letter-spacing:-.6px}
+#app{max-width:560px;margin:0 auto;position:relative}
+button,input,select,textarea{font-family:inherit;color:inherit}
+button{background:none;border:0;cursor:pointer;touch-action:manipulation;
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+h1,h2,h3{margin:0;letter-spacing:-.6px;overflow-wrap:anywhere}
 a{color:var(--accent)}
 
 /* ---------- estructura ---------- */
-.screen{padding:8px 16px calc(var(--dockpad,150px) + var(--safe-b))}
-.topbar{display:flex;align-items:center;gap:12px;padding:14px 16px 6px;position:sticky;top:0;z-index:20;background:var(--bg)}
-.topbar h1{font-size:24px;font-weight:800;flex:1;min-width:0}
-.topbar .sub{font-size:11px;color:var(--muted);font-weight:500;letter-spacing:0}
-.iconbtn{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;color:var(--fg);font-size:19px}
+.screen{padding:8px 16px calc(var(--bottomh) + 28px)}
+.topbar{display:flex;align-items:center;gap:10px;padding:12px 16px 6px;position:sticky;top:0;z-index:20;
+  background:var(--bg);min-height:56px}
+.topbar h1{font-size:23px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.topbar .sub{font-size:11px;color:var(--muted);font-weight:500;letter-spacing:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.iconbtn{width:42px;height:42px;flex:none;border-radius:12px;display:grid;place-items:center;
+  color:var(--fg);font-size:18px}
 .iconbtn:active{background:var(--card-2)}
+.iconbtn.sm{width:36px;height:36px;font-size:15px}
 .eyebrow{font-size:11px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted);margin:26px 4px 10px}
 .eyebrow.accent{color:var(--accent)}
 
 /* ---------- tarjetas ---------- */
 .card{background:var(--card);border-radius:var(--radius);padding:16px;border:1.5px solid transparent}
 .card+.card{margin-top:10px}
-.card.hl{border-color:color-mix(in srgb, var(--accent) 45%, transparent)}
+.card.hl{border-color:var(--accent-line2)}
 .card.solid{border-color:var(--accent)}
-.row{display:flex;align-items:center;gap:12px}
-.row.tight{gap:8px}
+.row{display:flex;align-items:center;gap:10px;min-width:0}
 .grow{flex:1;min-width:0}
+.ell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.stat{background:var(--card);border-radius:var(--radius);padding:14px 16px}
-.stat .v{font-size:23px;font-weight:800;letter-spacing:-.8px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat{background:var(--card);border-radius:var(--radius);padding:14px 16px;min-width:0}
+.stat .v{font-size:22px;font-weight:800;letter-spacing:-.8px;font-variant-numeric:tabular-nums;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .stat .v.accent{color:var(--accent)}
-.stat .l{font-size:11.5px;color:var(--muted);margin-top:1px}
+.stat .l{font-size:11.5px;color:var(--muted);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .muted{color:var(--muted)}
-.small{font-size:12px}
-.tiny{font-size:11px}
+.small{font-size:12.5px}
+.tiny{font-size:11.5px}
 .b7{font-weight:700}
 .b8{font-weight:800}
 .nums{font-variant-numeric:tabular-nums}
-.chip{display:inline-flex;align-items:center;padding:4px 9px;border-radius:8px;font-size:11px;font-weight:700;
-  background:color-mix(in srgb, var(--muted) 16%, transparent);color:var(--muted);white-space:nowrap}
-.chip.on{background:color-mix(in srgb, var(--accent) 18%, transparent);color:var(--accent)}
+.chip{display:inline-flex;align-items:center;padding:5px 10px;border-radius:9px;font-size:11.5px;font-weight:700;
+  background:var(--chip-bg);color:var(--chip-fg);white-space:nowrap}
+.chip.on{background:var(--accent-soft);color:var(--accent)}
 .wrap{display:flex;flex-wrap:wrap;gap:6px}
-.sep{height:1px;background:var(--line);margin:12px 0}
+.sep{height:1px;background:var(--line);margin:10px 0}
 
 /* ---------- botones ---------- */
 .btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:54px;border-radius:15px;
-  font-weight:800;letter-spacing:.6px;font-size:15px;background:var(--accent);color:var(--on-accent);padding:0 16px}
-.btn:active{transform:scale(.985)}
+  font-weight:800;letter-spacing:.5px;font-size:15px;background:var(--accent);color:var(--on-accent);padding:0 16px;
+  transition:transform .08s ease}
+.btn:active{transform:scale(.98)}
 .btn.ghost{background:transparent;border:1.5px solid var(--line);color:var(--fg)}
 .btn.grey{background:var(--card-2);color:var(--fg)}
-.btn.sm{min-height:44px;font-size:13px;border-radius:12px;width:auto;padding:0 16px}
-.btn.danger{background:transparent;color:var(--danger);border:1.5px solid color-mix(in srgb,var(--danger) 40%,transparent)}
+.btn.danger{background:transparent;color:var(--danger);border:1.5px solid var(--danger-line)}
 .btn[disabled]{opacity:.5;pointer-events:none}
-.pill{padding:8px 13px;border-radius:11px;background:var(--card-2);color:var(--fg);font-size:13px;font-weight:700;white-space:nowrap}
+.pill{min-height:40px;padding:0 14px;border-radius:11px;background:var(--card-2);color:var(--fg);
+  font-size:13px;font-weight:700;white-space:nowrap;display:inline-flex;align-items:center;flex:none}
 .pill.on{background:var(--accent);color:var(--on-accent)}
-.hscroll{display:flex;gap:8px;overflow-x:auto;padding:2px 16px;margin:0 -16px;scrollbar-width:none}
+.hscroll{display:flex;align-items:center;gap:8px;overflow-x:auto;padding:2px 16px;margin:0 -16px;
+  scrollbar-width:none;-webkit-overflow-scrolling:touch}
 .hscroll::-webkit-scrollbar{display:none}
+.hscroll.flush{margin:0;padding:0}
 
-/* ---------- formularios ---------- */
-label.f{display:block;margin-bottom:12px}
-label.f>span{display:block;font-size:11px;font-weight:800;letter-spacing:1.1px;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
-input.t,select.t,textarea.t{width:100%;background:var(--card-2);border:0;border-radius:12px;padding:13px 14px;outline:none}
+/* ---------- formularios (16px evita el zoom automático de iOS) ---------- */
+label.f{display:block;margin-bottom:12px;min-width:0}
+label.f>span{display:block;font-size:11px;font-weight:800;letter-spacing:1.1px;text-transform:uppercase;
+  color:var(--muted);margin-bottom:5px}
+input.t,select.t,textarea.t{width:100%;font-size:16px;background:var(--card-2);border:0;border-radius:12px;
+  padding:13px 14px;outline:none;-webkit-appearance:none;appearance:none}
+select.t{background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),
+  linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+  background-position:calc(100% - 18px) 21px, calc(100% - 13px) 21px;
+  background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:38px}
 input.t:focus,select.t:focus,textarea.t:focus{box-shadow:0 0 0 2px var(--accent)}
-textarea.t{resize:vertical;min-height:76px}
+textarea.t{resize:vertical;min-height:76px;line-height:1.4}
 
 /* ---------- stepper (una mano) ---------- */
-.stepper .cap{font-size:10px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
-.stepper .body{display:flex;align-items:center;gap:6px}
-.stepper .rnd{width:46px;height:46px;flex:none;border-radius:50%;background:var(--card-2);font-size:22px;font-weight:600;
-  display:grid;place-items:center;color:var(--fg)}
+.stepper{min-width:0}
+.stepper .cap{font-size:10px;font-weight:800;letter-spacing:1.1px;text-transform:uppercase;color:var(--muted);
+  margin-bottom:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stepper .body{display:flex;align-items:center;gap:4px;min-width:0}
+.stepper .rnd{width:46px;height:46px;flex:none;border-radius:50%;background:var(--card-2);font-size:22px;
+  font-weight:600;display:grid;place-items:center;color:var(--fg)}
 .stepper .rnd:active{background:var(--accent);color:var(--on-accent)}
 .stepper input{flex:1;min-width:0;width:100%;text-align:center;background:transparent;border:0;outline:none;
-  font-size:26px;font-weight:800;letter-spacing:-1px;font-variant-numeric:tabular-nums;padding:6px 0}
-.stepper .unit{font-size:12px;color:var(--muted);font-weight:700;flex:none}
+  font-size:25px;font-weight:800;letter-spacing:-1px;font-variant-numeric:tabular-nums;padding:6px 0;
+  -webkit-appearance:none;appearance:none}
+.stepper .unit{font-size:11px;color:var(--muted);font-weight:700;flex:none}
+@media (max-width:359px){
+  .stepper .rnd{width:42px;height:42px}
+  .stepper input{font-size:22px}
+  .grid2{gap:8px}
+}
 
 /* ---------- series ---------- */
-.setrow{display:flex;align-items:center;gap:12px;background:var(--card);border-radius:14px;padding:12px 14px;border:1.5px solid transparent}
+.setrow{display:flex;align-items:center;gap:12px;background:var(--card);border-radius:14px;padding:12px 14px;
+  border:1.5px solid transparent;min-width:0}
 .setrow.pending{opacity:.5}
-.setrow.done{border-color:color-mix(in srgb,var(--accent) 30%,transparent)}
-.badge{width:32px;height:32px;flex:none;border-radius:10px;display:grid;place-items:center;font-weight:800;font-size:13px;background:var(--card-2)}
+.setrow.done{border-color:var(--accent-line2)}
+.badge{width:32px;height:32px;flex:none;border-radius:10px;display:grid;place-items:center;
+  font-weight:800;font-size:13px;background:var(--card-2)}
 .badge.on{background:var(--accent);color:var(--on-accent)}
-.badge.ok{background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--accent)}
+.badge.ok{background:var(--accent-soft);color:var(--accent)}
 
 /* ---------- barra inferior ---------- */
 .bottom{position:fixed;left:0;right:0;bottom:0;z-index:40;background:var(--bg);
   padding-bottom:var(--safe-b);max-width:560px;margin:0 auto}
 .nav{display:flex;background:var(--card);border-top:1px solid var(--line)}
-.nav button{flex:1;padding:9px 2px 10px;display:grid;justify-items:center;gap:3px;color:var(--muted);font-size:10px;font-weight:700}
+.nav button.on .ic{transform:translateY(-1px)}
+.nav button{flex:1;min-width:0;padding:8px 2px 9px;display:grid;justify-items:center;gap:2px;
+  color:var(--muted);font-size:10px;font-weight:700;min-height:52px}
 .nav button.on{color:var(--accent)}
-.nav .ic{font-size:19px;line-height:1}
+.nav .ic{font-size:19px;line-height:1.1}
 .docked{padding:8px 16px 6px;display:grid;gap:8px}
+.docked:empty{display:none}
 
 /* ---------- temporizador ---------- */
-.timer{background:color-mix(in srgb,var(--accent) 13%,var(--card));border:1.5px solid color-mix(in srgb,var(--accent) 55%,transparent);
-  border-radius:16px;padding:10px 14px}
-.timer .clock{font-size:33px;font-weight:900;letter-spacing:-1.5px;color:var(--accent);font-variant-numeric:tabular-nums;line-height:1.1}
-.timer .bar{height:5px;background:color-mix(in srgb,var(--accent) 20%,transparent);border-radius:3px;overflow:hidden;margin-top:7px}
+.timer{background:var(--accent-timer);border:1.5px solid var(--accent-line);
+  border-radius:16px;padding:9px 12px}
+.timer .clock{font-size:31px;font-weight:900;letter-spacing:-1.5px;color:var(--accent);
+  font-variant-numeric:tabular-nums;line-height:1.15}
+.timer .bar{height:5px;background:var(--accent-soft2);border-radius:3px;overflow:hidden;margin-top:6px}
 .timer .bar i{display:block;height:100%;background:var(--accent);width:0;transition:width .25s linear}
-.tact{display:grid;justify-items:center;gap:2px;padding:2px 7px;font-size:10px;color:var(--muted);font-weight:700}
-.tact .ic{font-size:17px;color:var(--fg)}
+.tact{display:grid;justify-items:center;gap:1px;padding:4px 6px;font-size:10px;color:var(--muted);
+  font-weight:700;min-width:44px;border-radius:10px}
+.tact:active{background:var(--accent-soft)}
+.tact .ic{font-size:17px;color:var(--fg);line-height:1.2}
 @keyframes flash{0%,100%{opacity:1}50%{opacity:.35}}
 .timer.over{animation:flash .7s ease-in-out 3}
 
+/* ---------- flotantes anclados a la barra real ---------- */
+.fabwrap{position:fixed;left:0;right:0;bottom:calc(var(--bottomh) + 10px);z-index:35;
+  max-width:560px;margin:0 auto;padding:0 16px;display:flex;justify-content:flex-end;pointer-events:none}
+.fab{pointer-events:auto;background:var(--accent);color:var(--on-accent);border-radius:16px;
+  min-height:52px;padding:0 20px;font-weight:800;font-size:14px;display:inline-flex;align-items:center;gap:7px;
+  box-shadow:0 6px 22px rgba(0,0,0,.34)}
+.fab:active{transform:scale(.97)}
+.toast{position:fixed;left:16px;right:16px;bottom:calc(var(--bottomh) + 10px);z-index:80;
+  background:var(--accent);color:var(--on-accent);border-radius:14px;padding:13px 16px;font-weight:700;
+  max-width:528px;margin:0 auto;box-shadow:0 8px 24px rgba(0,0,0,.35);animation:up .2s ease-out}
+.toast.plain{background:var(--card-2);color:var(--fg)}
+/* Con el teclado abierto no compiten por el mismo espacio. */
+body.kb .bottom,body.kb .fabwrap{display:none}
+
 /* ---------- sheets y diálogos ---------- */
-.scrim{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:60;display:flex;align-items:flex-end;justify-content:center}
+.scrim{position:fixed;top:0;left:0;right:0;bottom:var(--kb);background:rgba(0,0,0,.6);z-index:60;
+  display:flex;align-items:flex-end;justify-content:center}
 .scrim.center{align-items:center;padding:20px}
-.sheet{background:var(--bg);width:100%;max-width:560px;border-radius:22px 22px 0 0;max-height:88vh;overflow:auto;
+.sheet{background:var(--bg);width:100%;max-width:560px;border-radius:22px 22px 0 0;max-height:86vh;
+  overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;
   padding:14px 16px calc(24px + var(--safe-b));animation:up .22s ease-out}
-.sheet.dialog{border-radius:20px;max-width:400px;padding:20px;animation:none}
+.sheet.dialog{border-radius:20px;max-width:400px;padding:20px;animation:none;max-height:82vh}
 @keyframes up{from{transform:translateY(18px);opacity:.5}to{transform:none;opacity:1}}
-.grab{width:38px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 14px}
+.grab{width:38px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 14px;flex:none}
 .sheet h3{font-size:19px;font-weight:800;margin-bottom:14px}
-.opt{display:flex;align-items:center;gap:12px;padding:14px 4px;border-bottom:1px solid var(--line);width:100%;text-align:left}
+.opt{display:flex;align-items:center;gap:12px;padding:15px 4px;border-bottom:1px solid var(--line);
+  width:100%;text-align:left;min-height:54px;font-size:15px}
 .opt:last-child{border-bottom:0}
 .opt.danger{color:var(--danger)}
 
@@ -152,16 +224,10 @@ textarea.t{resize:vertical;min-height:76px}
 .empty{text-align:center;padding:46px 24px;color:var(--muted)}
 .empty .ic{font-size:40px;opacity:.5}
 .empty h3{font-size:17px;color:var(--fg);margin:12px 0 6px}
-.toast{position:fixed;left:16px;right:16px;bottom:calc(100px + var(--safe-b));z-index:80;background:var(--accent);color:var(--on-accent);
-  border-radius:14px;padding:13px 16px;font-weight:700;max-width:528px;margin:0 auto;box-shadow:0 8px 24px rgba(0,0,0,.35);
-  animation:up .2s ease-out}
-.toast.plain{background:var(--card-2);color:var(--fg)}
-.banner{background:color-mix(in srgb,var(--danger) 15%,transparent);border:1px solid color-mix(in srgb,var(--danger) 40%,transparent);
-  color:var(--fg);border-radius:12px;padding:10px 12px;font-size:12px;margin-bottom:12px}
+.banner{background:var(--danger-soft);border:1px solid var(--danger-line);color:var(--fg);border-radius:12px;
+  padding:11px 13px;font-size:12.5px;line-height:1.45;margin-bottom:12px}
 svg.chart{width:100%;display:block;overflow:visible}
-.fab{position:fixed;right:16px;bottom:calc(96px + var(--safe-b));z-index:35;background:var(--accent);color:var(--on-accent);
-  border-radius:16px;padding:14px 18px;font-weight:800;font-size:14px;box-shadow:0 6px 20px rgba(0,0,0,.3);display:flex;gap:7px;align-items:center}
-@media (min-width:600px){.fab{right:calc(50vw - 264px)}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
@@ -850,18 +916,33 @@ setInterval(() => {
 /* ================================================================
    SHEETS, DIÁLOGOS Y AVISOS
    ================================================================ */
-function closeLayer(){ $('#layer').innerHTML = ''; }
+/* scrollIntoView con opciones no existe en Safari antiguo; nunca debe
+   tumbar la app por un detalle cosmético. */
+function scrollIntoViewSafe(el, opts){
+  if(!el || typeof el.scrollIntoView !== 'function') return;
+  try{ el.scrollIntoView(opts); }catch(e){ try{ el.scrollIntoView(); }catch(e2){} }
+}
+
+function closeLayer(){ $('#layer').innerHTML = ''; lockScroll(false); }
+
+/* Con un sheet abierto, el fondo no debe desplazarse detrás. */
+function lockScroll(on){ document.body.style.overflow = on ? 'hidden' : ''; }
 
 function sheet(html, opts={}){
   $('#layer').innerHTML =
     `<div class="scrim" data-scrim="1"><div class="sheet">
        <div class="grab"></div>${html}</div></div>`;
-  if(opts.focus) setTimeout(() => { const f = $('#layer '+opts.focus); if(f) f.focus(); }, 60);
+  lockScroll(true);
+  if(opts.focus) setTimeout(() => {
+    const f = $('#layer ' + opts.focus);
+    if(f){ f.focus(); scrollIntoViewSafe(f, {block:'center'}); }
+  }, 120);
 }
 
 function dialog(html){
   $('#layer').innerHTML =
     `<div class="scrim center" data-scrim="1"><div class="sheet dialog">${html}</div></div>`;
+  lockScroll(true);
 }
 
 function confirmDialog(title, message, confirmLabel='Confirmar'){
@@ -905,20 +986,22 @@ function toast(html, plain=false){
 
 /* Selector de ejercicio reutilizable (rutinas y sesión activa). */
 function pickExercise(onPick){
-  const list = ExerciseRepo.all(state.pickSearch || '');
+  const rowsFor = q => {
+    const list = ExerciseRepo.all(q || '');
+    return list.length
+      ? list.map(e => `<button class="opt" data-pick="${e.id}">
+          <div class="grow"><div class="b7 ell">${esc(e.name)}</div>
+          <div class="tiny muted ell">${esc(e.muscle_group)} · ${esc(e.equipment)}</div></div></button>`).join('')
+      : '<p class="muted small" style="padding:14px 4px">Sin resultados. Puedes crear uno nuevo en Más → Ejercicios.</p>';
+  };
   sheet(`<h3>Elegir ejercicio</h3>
-    <input class="t" id="pick-search" placeholder="Buscar…" value="${esc(state.pickSearch||'')}" style="margin-bottom:12px">
-    <div id="pick-list">${
-      list.map(e => `<button class="opt" data-pick="${e.id}">
-        <div class="grow"><div class="b7">${esc(e.name)}</div>
-        <div class="tiny muted">${esc(e.muscle_group)} · ${esc(e.equipment)}</div></div></button>`).join('')
-      || '<p class="muted small">Sin resultados. Crea uno nuevo desde Más → Ejercicios.</p>'}</div>`);
+    <input class="t" id="pick-search" placeholder="Buscar…" autocomplete="off" style="margin-bottom:12px">
+    <div id="pick-list">${rowsFor('')}</div>`);
   const search = $('#pick-search');
-  search.oninput = () => { state.pickSearch = search.value; pickExercise(onPick); $('#pick-search').focus(); };
+  search.oninput = () => { $('#pick-list').innerHTML = rowsFor(search.value); };
   $('#pick-list').onclick = ev => {
     const btn = ev.target.closest('[data-pick]');
     if(!btn) return;
-    state.pickSearch = '';
     closeLayer();
     onPick(Number(btn.dataset.pick));
   };
@@ -1018,7 +1101,7 @@ function screenHome(){
       <div class="eyebrow accent" style="margin:0 0 4px">${weekdayName(day.weekday)}</div>
       <h2 style="font-size:26px;font-weight:800">${esc(day.title)}</h2>
       <div style="margin:16px 0 4px">${items.map(e => `<div class="row" style="margin-bottom:9px">
-        <div class="grow b7" style="font-weight:600">${esc(e.exercise_name)}</div>
+        <div class="grow b7 ell" style="font-weight:600">${esc(e.exercise_name)}</div>
         <div class="muted b7 nums">${e.target_sets} × ${e.target_reps_max && e.target_reps_max !== e.target_reps
           ? e.target_reps+'-'+e.target_reps_max : e.target_reps}</div></div>`).join('')
         || '<p class="muted small">Este día aún no tiene ejercicios.</p>'}</div>
@@ -1050,12 +1133,12 @@ function screenHome(){
     </div>
     ${last ? `<div class="eyebrow">Último entrenamiento</div>
       <div class="card" data-act="open-workout" data-v="${last.id}"><div class="row">
-        <div class="grow"><div class="b7">${esc(last.title)}</div>
+        <div class="grow"><div class="b7 ell">${esc(last.title)}</div>
           <div class="tiny muted">${fmtDate(last.started_at)} · ${fmtDur(last.duration_seconds)}</div></div>
         <div class="b8 nums" style="color:var(--accent)">${kg(last.total_volume)}</div></div></div>` : ''}
     ${records.length ? `<div class="eyebrow">Últimos récords</div>${
       records.map(r => `<div class="card"><div class="row">
-        <div>🏆</div><div class="grow"><div class="b7">${esc(r.exercise_name)}</div>
+        <div>🏆</div><div class="grow"><div class="b7 ell">${esc(r.exercise_name)}</div>
         <div class="tiny muted">${PR_LABEL[r.record_type]}</div></div>
         <div class="b8 nums" style="color:var(--accent)">${num(r.weight)} kg × ${r.reps}</div></div></div>`).join('')}` : ''}
   </div>`;
@@ -1100,7 +1183,7 @@ function screenActiveWorkout(w){
                     .reduce((b,s) => b + s.weight*s.reps, 0), 0);
 
   const header = `<div class="topbar">
-    <div class="grow"><h1 style="font-size:19px">${esc(w.title)}</h1>
+    <div class="grow"><h1 style="font-size:18px">${esc(w.title)}</h1>
       <div class="sub nums"><span id="elapsed">${fmtDur((now()-w.started_at)/1000)}</span> ·
         ${done}/${total} series · ${kg(volume)}</div></div>
     <button class="iconbtn" data-act="add-ex-workout">＋</button>
@@ -1111,7 +1194,7 @@ function screenActiveWorkout(w){
       'Agrega el primer ejercicio para empezar a registrar series.',
       '<button class="btn" data-act="add-ex-workout" style="margin-top:18px">AGREGAR EJERCICIO</button>')}</div>`;
 
-  const tabs = `<div class="hscroll" style="padding:2px 16px 6px">${
+  const tabs = `<div class="hscroll" style="padding:2px 16px 8px;position:sticky;top:var(--topbarh);z-index:19;background:var(--bg)">${
     groups.map((g,i) => {
       const gd = g.sets.filter(s => s.is_completed).length;
       return `<button class="pill${i===state.workoutTab?' on':''}" data-act="wtab" data-v="${i}">
@@ -1135,7 +1218,7 @@ function screenActiveWorkout(w){
         <div class="badge">${s.set_number}</div>
         <div class="grow nums b7">${num(s.weight)} kg × ${s.reps}</div>
         <button class="iconbtn" data-act="del-set" data-v="${s.id}">✕</button></div>`;
-    return `<div class="card solid" style="margin-bottom:10px">
+    return `<div class="card solid" id="active-set" style="margin-bottom:10px">
       <div class="row" style="margin-bottom:10px">
         <div class="badge on">${s.set_number}</div>
         <div class="grow b8" style="font-size:12px;letter-spacing:1.2px">SERIE ${s.set_number}</div>
@@ -1152,7 +1235,7 @@ function screenActiveWorkout(w){
   }).join('');
 
   return header + tabs + `<div class="screen" style="padding-top:10px">
-    <h2 style="font-size:27px;font-weight:800;letter-spacing:-1px">${esc(we.exercise_name)}</h2>
+    <h2 style="font-size:26px;font-weight:800;letter-spacing:-1px;line-height:1.15">${esc(we.exercise_name)}</h2>
     <div class="wrap" style="margin:8px 0 18px">
       <span class="chip on">Objetivo: ${we.target_sets} × ${we.target_reps}</span>
       ${we.target_weight ? `<span class="chip">${kg(we.target_weight)}</span>` : ''}
@@ -1181,7 +1264,7 @@ function screenRoutines(){
       </div></div>`).join('')
     : empty('📅','Aún no tienes rutinas','Crea tu primera rutina y organiza la semana a tu gusto.')}
   </div>
-  <button class="fab" data-act="new-routine">＋ Nueva rutina</button>`;
+  <div class="fabwrap"><button class="fab" data-act="new-routine">＋ Nueva rutina</button></div>`;
 }
 
 function screenRoutine(routineId){
@@ -1205,7 +1288,7 @@ function screenRoutine(routineId){
       </div>
       ${d.is_rest ? '<div style="margin-top:8px"><span class="chip">DESCANSO</span></div>' :
         (items.length ? `<div style="margin-top:10px">${items.map(e => `<div class="row" style="margin-bottom:6px">
-          <div class="grow small">${esc(e.exercise_name)}</div>
+          <div class="grow small ell">${esc(e.exercise_name)}</div>
           <div class="tiny muted b7 nums">${e.target_sets} × ${e.target_reps}</div></div>`).join('')}</div>`
         : '<div class="tiny muted" style="margin-top:8px">Sin ejercicios — toca para configurar</div>')}
     </div>`;
@@ -1213,7 +1296,7 @@ function screenRoutine(routineId){
     <p class="tiny muted" style="text-align:center;margin-top:18px">
       Editar esta rutina nunca modifica los entrenamientos ya guardados.</p>
   </div>
-  <button class="fab" data-act="add-day" data-v="${routineId}">＋ Agregar día</button>`;
+  <div class="fabwrap"><button class="fab" data-act="add-day" data-v="${routineId}">＋ Agregar día</button></div>`;
 }
 
 function screenDay(dayId){
@@ -1227,10 +1310,10 @@ function screenDay(dayId){
   <div class="screen">${
     items.length ? items.map((e,i) => `<div class="card">
       <div class="row">
-        <div class="grow b7" style="font-size:16px" data-act="config-ex" data-v="${e.id}">${esc(e.exercise_name)}</div>
-        <button class="iconbtn" data-act="move-ex" data-v="${e.id}" data-d="-1" data-day="${dayId}" ${i===0?'style="opacity:.3"':''}>↑</button>
-        <button class="iconbtn" data-act="move-ex" data-v="${e.id}" data-d="1" data-day="${dayId}" ${i===items.length-1?'style="opacity:.3"':''}>↓</button>
-        <button class="iconbtn" data-act="del-routine-ex" data-v="${e.id}">🗑</button>
+        <div class="grow b7 ell" style="font-size:16px" data-act="config-ex" data-v="${e.id}">${esc(e.exercise_name)}</div>
+        <button class="iconbtn sm" data-act="move-ex" data-v="${e.id}" data-d="-1" data-day="${dayId}" ${i===0?'style="opacity:.25"':''}>↑</button>
+        <button class="iconbtn sm" data-act="move-ex" data-v="${e.id}" data-d="1" data-day="${dayId}" ${i===items.length-1?'style="opacity:.25"':''}>↓</button>
+        <button class="iconbtn sm" data-act="del-routine-ex" data-v="${e.id}">🗑</button>
       </div>
       <div class="wrap" style="margin-top:10px" data-act="config-ex" data-v="${e.id}">
         <span class="chip on">${e.target_sets} series</span>
@@ -1244,7 +1327,7 @@ function screenDay(dayId){
     </div>`).join('')
     : empty('🏋️','Día sin ejercicios','Agrega ejercicios y define series, repeticiones y peso.')}
   </div>
-  <button class="fab" data-act="add-day-ex" data-v="${dayId}">＋ Ejercicio</button>`;
+  <div class="fabwrap"><button class="fab" data-act="add-day-ex" data-v="${dayId}">＋ Ejercicio</button></div>`;
 }
 
 /* ================================================================
@@ -1320,7 +1403,7 @@ function screenExercises(){
       </div><div class="muted">›</div></div></div>`).join('')
     : empty('🔍','Sin resultados','Puedes crear un ejercicio personalizado con el botón +.')}
   </div>
-  <button class="fab" data-act="new-exercise">＋ Nuevo</button>`;
+  <div class="fabwrap"><button class="fab" data-act="new-exercise">＋ Nuevo</button></div>`;
 }
 
 function screenExercise(id){
@@ -1345,13 +1428,13 @@ function screenExercise(id){
       <div class="b8 nums" style="color:var(--accent)">${
         r.record_type === 'max_1rm' ? num(r.value)+' kg' : num(r.weight)+' kg × '+r.reps}</div></div></div>`).join('')}` : ''}
     <div class="eyebrow">Evolución</div>
-    <div class="hscroll" style="padding:0 0 12px;margin:0">
+    <div class="hscroll flush" style="padding-bottom:12px">
       ${[['weight','Peso'],['reps','Reps'],['volume','Volumen']].map(([k,l]) =>
         `<button class="pill${metric===k?' on':''}" data-act="metric" data-v="${k}">${l}</button>`).join('')}</div>
     <div class="card">${lineChart(chartPoints)}</div>
     <div class="eyebrow">Últimos entrenamientos</div>
     ${sessions.length ? sessions.map(s => `<div class="card">
-      <div class="row"><div class="grow b7 small">${fmtDate(s.date)}</div>
+      <div class="row"><div class="grow b7 small ell">${fmtDate(s.date)}</div>
         <div class="tiny muted nums">${kg(s.volume)} · 1RM ~${num(epley(s.bestWeight,s.bestReps))} kg</div></div>
       <div class="wrap" style="margin-top:9px">${s.sets.map(x =>
         `<span class="chip">${num(x.weight)} × ${x.reps}</span>`).join('')}</div></div>`).join('')
@@ -1411,14 +1494,14 @@ function screenMeasures(){
       <div class="card">${lineChart(points)}</div>
       <div class="eyebrow">Registros</div>
       ${list.map(m => `<div class="card">
-        <div class="row"><div class="grow b7 small">${fmtDate(m.measured_at)}</div>
+        <div class="row"><div class="grow b7 small ell">${fmtDate(m.measured_at)}</div>
           <button class="iconbtn" data-act="del-measure" data-v="${m.id}">🗑</button></div>
         <div class="wrap" style="margin-top:6px">${FIELDS.filter(([k]) => m[k] != null && m[k] !== '')
           .map(([k,l,u]) => `<span class="chip">${l} ${num(m[k])} ${u}</span>`).join('')}</div>
       </div>`).join('')}`
     : empty('📏','Sin medidas registradas','Registra peso corporal y medidas para ver tu evolución.')}
   </div>
-  <button class="fab" data-act="new-measure">＋ Registrar</button>`;
+  <div class="fabwrap"><button class="fab" data-act="new-measure">＋ Registrar</button></div>`;
 }
 
 function screenSettings(){
@@ -1426,7 +1509,7 @@ function screenSettings(){
   return `<div class="topbar"><button class="iconbtn" data-act="back">←</button><h1>Configuración</h1></div>
   <div class="screen">
     <div class="eyebrow" style="margin-top:6px">Apariencia</div>
-    <div class="card"><div class="hscroll" style="margin:0;padding:0">
+    <div class="card"><div class="hscroll flush">
       ${[['dark','Oscuro'],['light','Claro'],['system','Sistema']].map(([k,l]) =>
         `<button class="pill${s.theme===k?' on':''}" data-act="theme" data-v="${k}">${l}</button>`).join('')}
     </div></div>
@@ -1482,7 +1565,9 @@ function render(){
   else if(v.name === 'workout') html = screenWorkout(v.id);
   else html = (screens[v.name] || screenHome)();
 
+  const keepY = window.scrollY;
   $('#view').innerHTML = html;
+  if(keepY) window.scrollTo(0, keepY);
   $('#nav').innerHTML = NAV.map(([k,ic,l]) =>
     `<button class="${state.tab===k?'on':''}" data-act="tab" data-v="${k}">
       <span class="ic">${ic}</span><span>${l}</span></button>`).join('');
@@ -1515,8 +1600,51 @@ function renderDock(){
   if(inWorkout) parts.push(`<button class="btn grey" data-act="finish-workout">FINALIZAR ENTRENAMIENTO</button>`);
 
   $('#dock').innerHTML = parts.join('');
-  const pad = $('#dock').offsetHeight + $('#nav').offsetHeight + 24;
-  document.documentElement.style.setProperty('--dockpad', pad + 'px');
+  measureChrome();
+}
+
+/* La barra inferior cambia de altura según haya temporizador y botón de
+   finalizar. Se mide en vez de asumirla, y todo lo flotante (FAB, toast,
+   relleno inferior de la pantalla) se ancla a esa medida real: así nada
+   queda debajo de otra cosa en ninguna combinación. */
+function measureChrome(){
+  const bar = document.querySelector('.bottom');
+  if(!bar) return;
+  const h = document.body.classList.contains('kb') ? 0 : bar.offsetHeight;
+  document.documentElement.style.setProperty('--bottomh', Math.round(h) + 'px');
+  const top = document.querySelector('.topbar');
+  if(top) document.documentElement.style.setProperty('--topbarh', Math.round(top.offsetHeight) + 'px');
+}
+window.addEventListener('resize', measureChrome);
+window.addEventListener('orientationchange', () => setTimeout(measureChrome, 250));
+if(window.ResizeObserver){
+  new ResizeObserver(measureChrome).observe(document.querySelector('.bottom'));
+}
+
+/* Teclado en pantalla: en Android empuja los elementos fijos y en iOS los
+   tapa. Medimos el viewport visual, escondemos la barra inferior mientras
+   se escribe y levantamos los sheets por encima del teclado. */
+if(window.visualViewport){
+  const vv = window.visualViewport;
+  const onViewport = () => {
+    const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    document.documentElement.style.setProperty('--kb', Math.round(kb) + 'px');
+    document.body.classList.toggle('kb', kb > 120);
+    measureChrome();
+  };
+  vv.addEventListener('resize', onViewport);
+  vv.addEventListener('scroll', onViewport);
+} else {
+  // Navegadores antiguos: nos basta con saber si hay un campo enfocado.
+  const isField = el => el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName);
+  document.addEventListener('focusin', e => {
+    if(isField(e.target)){ document.body.classList.add('kb'); measureChrome(); }
+  });
+  document.addEventListener('focusout', () => {
+    setTimeout(() => {
+      if(!isField(document.activeElement)){ document.body.classList.remove('kb'); measureChrome(); }
+    }, 80);
+  });
 }
 
 /* ================================================================
@@ -1587,6 +1715,10 @@ document.addEventListener('click', async ev => {
       toast(`🏆 <b>NUEVO RÉCORD</b><br><span style="font-weight:500">${
         records.map(r => PR_LABEL[r.record_type]).join(' · ')}</span>`);
     render();
+    setTimeout(() => {
+      scrollIntoViewSafe(document.getElementById('active-set'),
+        {block:'center', behavior:'smooth'});
+    }, 60);
     break;
   }
   case 'add-set': WorkoutRepo.addSet(Number(v)); render(); break;
@@ -1957,17 +2089,25 @@ function measureSheet(){
 /* ================================================================
    TEMA, PANTALLA ACTIVA E INICIO
    ================================================================ */
+function prefersDark(){
+  try{ return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches); }
+  catch(e){ return true; }
+}
 function applyTheme(){
   const t = db().settings.theme || 'dark';
-  const dark = t === 'dark' || (t === 'system' &&
-    window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const dark = t === 'dark' || (t === 'system' && prefersDark());
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
   const meta = document.querySelector('meta[name="theme-color"]');
   if(meta) meta.content = dark ? '#0E1113' : '#F3F5F0';
 }
-window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-  if(db().settings.theme === 'system'){ applyTheme(); render(); }
-});
+/* Safari antiguo solo tiene addListener, y algunos WebViews no traen
+   matchMedia: el tema del sistema es opcional, la app nunca debe caerse. */
+try{
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  const onScheme = () => { if(db().settings.theme === 'system'){ applyTheme(); render(); } };
+  if(mq.addEventListener) mq.addEventListener('change', onScheme);
+  else if(mq.addListener) mq.addListener(onScheme);
+}catch(e){}
 
 /* Evita que la pantalla se apague en mitad de la serie (si el navegador lo permite). */
 let wakeLock = null;
