@@ -254,7 +254,8 @@ const db = () => store.data;
 const now = () => Date.now();
 
 function emptyStore(){
-  const data = {schema_version:1, seq:{}, settings:{theme:'dark',sound:true,vibration:true,defaultRest:120}};
+  const data = {schema_version:1, seq:{},
+    settings:{theme:'dark', sound:true, vibration:true, defaultRest:120, unit:'lb'}};
   TABLES.forEach(t => data[t] = []);
   return {app:'gym_tracker', schema_version:1, exported_at:new Date().toISOString(), data};
 }
@@ -294,7 +295,10 @@ function load(){
       if(parsed && parsed.data){
         store = parsed;
         TABLES.forEach(t => { if(!Array.isArray(db()[t])) db()[t] = []; });
-        if(!db().settings) db().settings = {theme:'dark',sound:true,vibration:true,defaultRest:120};
+        if(!db().settings) db().settings = {theme:'dark',sound:true,vibration:true,defaultRest:120,unit:'lb'};
+        // Instalaciones anteriores a las unidades escribieron sus números
+        // pensando en kilos: se respetan tal cual.
+        if(!db().settings.unit) db().settings.unit = 'kg';
         if(!db().seq) db().seq = {};
         return;
       }
@@ -356,6 +360,8 @@ const SEED_EXERCISES = [
   ['Crunch en polea','Abdomen','Polea','Aislamiento','']
 ];
 
+const LB2KG = lb => Math.round((lb / 2.2046226218) * 1000) / 1000;
+
 function seed(){
   const idOf = {};
   SEED_EXERCISES.forEach(([name,group,equipment,type,instructions]) => {
@@ -368,16 +374,17 @@ function seed(){
     notes:'Rutina de ejemplo. Edítala o crea la tuya.',is_active:true,
     created_at:now(),updated_at:now()});
 
+  // Pesos escritos en libras y guardados en kilos.
   const plan = [
-    [1,'Pecho + Tríceps',false,[['Press banca',4,8,60,120,8],['Press inclinado con mancuernas',3,10,22.5,90,8],
-      ['Aperturas con mancuernas',3,12,12,60,8],['Extensión de tríceps en polea',3,12,25,60,8]]],
-    [2,'Espalda + Bíceps',false,[['Dominadas',4,8,0,120,8],['Remo con barra',4,8,50,120,8],
-      ['Jalón al pecho',3,12,45,90,8],['Curl con barra',3,12,20,60,8]]],
+    [1,'Pecho + Tríceps',false,[['Press banca',4,8,135,120,8],['Press inclinado con mancuernas',3,10,50,90,8],
+      ['Aperturas con mancuernas',3,12,25,60,8],['Extensión de tríceps en polea',3,12,50,60,8]]],
+    [2,'Espalda + Bíceps',false,[['Dominadas',4,8,0,120,8],['Remo con barra',4,8,115,120,8],
+      ['Jalón al pecho',3,12,100,90,8],['Curl con barra',3,12,45,60,8]]],
     [3,'Descanso',true,[]],
-    [4,'Piernas',false,[['Sentadilla',4,8,80,180,8],['Prensa',4,10,120,120,8],
-      ['Peso muerto rumano',3,10,60,120,8],['Curl femoral',3,12,35,60,8],['Pantorrillas',4,15,40,45,8]]],
-    [5,'Hombros + Abdomen',false,[['Press militar',4,8,40,120,8],['Elevaciones laterales',4,12,8,60,8],
-      ['Face pulls',3,15,20,60,8]]],
+    [4,'Piernas',false,[['Sentadilla',4,8,185,180,8],['Prensa',4,10,270,120,8],
+      ['Peso muerto rumano',3,10,135,120,8],['Curl femoral',3,12,80,60,8],['Pantorrillas',4,15,90,45,8]]],
+    [5,'Hombros + Abdomen',false,[['Press militar',4,8,95,120,8],['Elevaciones laterales',4,12,20,60,8],
+      ['Face pulls',3,15,45,60,8]]],
     [6,'Descanso',true,[]],
     [7,'Descanso',true,[]]
   ];
@@ -386,7 +393,7 @@ function seed(){
     const day = insert('routine_days',{routine_id:routine.id,weekday,title,is_rest:rest,order_index:di});
     items.forEach(([exName,sets,reps,weight,restSec,rpe],i) => {
       insert('routine_exercises',{routine_day_id:day.id,exercise_id:idOf[exName],order_index:i,
-        target_sets:sets,target_reps:reps,target_reps_max:null,target_weight:weight,
+        target_sets:sets,target_reps:reps,target_reps_max:null,target_weight:LB2KG(weight),
         rest_seconds:restSec,target_rpe:rpe,notes:''});
     });
   });
@@ -754,6 +761,8 @@ const BackupRepo = {
     const data = raw.data;
     TABLES.forEach(t => { if(!Array.isArray(data[t])) data[t] = []; });
     if(!data.settings) data.settings = {theme:'dark',sound:true,vibration:true,defaultRest:120};
+    // Los respaldos de la versión Flutter guardan kilos y no traen unidad.
+    if(!data.settings.unit) data.settings.unit = 'kg';
     // Los respaldos de la versión Flutter no traen "seq": lo reconstruimos.
     data.seq = data.seq || {};
     TABLES.forEach(t => {
@@ -784,10 +793,34 @@ const num = v => {
   const n = Number(v) || 0;
   return n % 1 === 0 ? String(n) : n.toFixed(1);
 };
-const kg = v => {
-  const n = Math.round((Number(v)||0) * 10) / 10;
-  return (n % 1 === 0 ? n.toLocaleString('en-US') : n.toLocaleString('en-US',{maximumFractionDigits:1})) + ' kg';
+/* ---------------- Unidades ----------------
+   Todo se ALMACENA siempre en kilos y centímetros. La unidad elegida
+   es solo una capa de presentación: se convierte al mostrar y al leer
+   un campo. Así cambiar de libras a kilos nunca altera el historial
+   ni descuadra los volúmenes acumulados, y los respaldos siguen
+   siendo compatibles con la versión Flutter. */
+const LB_PER_KG = 2.2046226218;
+const CM_PER_IN = 2.54;
+
+const unitW = () => (db().settings.unit === 'kg' ? 'kg' : 'lb');
+const unitL = () => (unitW() === 'kg' ? 'cm' : 'in');
+
+const kgToUnit = v => unitW() === 'lb' ? (Number(v)||0) * LB_PER_KG : (Number(v)||0);
+const unitToKg = v => unitW() === 'lb' ? (Number(v)||0) / LB_PER_KG : (Number(v)||0);
+const cmToUnit = v => unitL() === 'in' ? (Number(v)||0) / CM_PER_IN : (Number(v)||0);
+const unitToCm = v => unitL() === 'in' ? (Number(v)||0) * CM_PER_IN : (Number(v)||0);
+
+/* Número de peso ya convertido, sin etiqueta (para "60 × 8"). */
+const wnum = v => num(Math.round(kgToUnit(v) * 10) / 10);
+/* Peso con etiqueta y separador de miles (para volúmenes). */
+const wt = v => {
+  const n = Math.round(kgToUnit(v) * 10) / 10;
+  return (n % 1 === 0 ? n.toLocaleString('en-US') : n.toLocaleString('en-US',{maximumFractionDigits:1}))
+    + ' ' + unitW();
 };
+/* Incremento natural del stepper según la unidad. */
+const wStep = () => unitW() === 'lb' ? 5 : 2.5;
+const wMax = () => unitW() === 'lb' ? 2200 : 1000;
 const fmtDate = ms => { const d = new Date(ms); return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`; };
 const fmtShort = ms => { const d = new Date(ms), p = n => String(n).padStart(2,'0');
   return `${p(d.getDate())}/${p(d.getMonth()+1)}`; };
@@ -1127,7 +1160,7 @@ function screenHome(){
     <div class="eyebrow">Esta semana</div>
     <div class="grid2">
       ${statTile('Entrenamientos', week.workouts, true)}
-      ${statTile('Volumen semanal', kg(week.volume))}
+      ${statTile('Volumen semanal', wt(week.volume))}
       ${statTile('Racha actual', ProgressRepo.streak() === 1 ? '1 día' : ProgressRepo.streak()+' días')}
       ${statTile('Tiempo entrenado', fmtDur(week.seconds))}
     </div>
@@ -1135,12 +1168,12 @@ function screenHome(){
       <div class="card" data-act="open-workout" data-v="${last.id}"><div class="row">
         <div class="grow"><div class="b7 ell">${esc(last.title)}</div>
           <div class="tiny muted">${fmtDate(last.started_at)} · ${fmtDur(last.duration_seconds)}</div></div>
-        <div class="b8 nums" style="color:var(--accent)">${kg(last.total_volume)}</div></div></div>` : ''}
+        <div class="b8 nums" style="color:var(--accent)">${wt(last.total_volume)}</div></div></div>` : ''}
     ${records.length ? `<div class="eyebrow">Últimos récords</div>${
       records.map(r => `<div class="card"><div class="row">
         <div>🏆</div><div class="grow"><div class="b7 ell">${esc(r.exercise_name)}</div>
         <div class="tiny muted">${PR_LABEL[r.record_type]}</div></div>
-        <div class="b8 nums" style="color:var(--accent)">${num(r.weight)} kg × ${r.reps}</div></div></div>`).join('')}` : ''}
+        <div class="b8 nums" style="color:var(--accent)">${wnum(r.weight)} ${unitW()} × ${r.reps}</div></div></div>`).join('')}` : ''}
   </div>`;
 }
 
@@ -1164,7 +1197,7 @@ function screenTrain(){
       <div style="margin:16px 0 6px">${items.map(e => `<div style="margin-bottom:11px">
         <div class="b7" style="font-weight:600">${esc(e.exercise_name)}</div>
         <div class="tiny muted nums">${e.target_sets} × ${e.target_reps}${
-          e.target_weight ? ' · '+kg(e.target_weight) : ''} · ${e.rest_seconds}s descanso</div></div>`).join('')}</div>
+          e.target_weight ? ' · '+wt(e.target_weight) : ''} · ${e.rest_seconds}s descanso</div></div>`).join('')}</div>
       ${canStart
         ? `<button class="btn" data-act="start-today">▶  INICIAR ENTRENAMIENTO</button>`
         : `<button class="btn ghost" data-act="tab" data-v="routines">IR A RUTINAS</button>`}
@@ -1185,7 +1218,7 @@ function screenActiveWorkout(w){
   const header = `<div class="topbar">
     <div class="grow"><h1 style="font-size:18px">${esc(w.title)}</h1>
       <div class="sub nums"><span id="elapsed">${fmtDur((now()-w.started_at)/1000)}</span> ·
-        ${done}/${total} series · ${kg(volume)}</div></div>
+        ${done}/${total} series · ${wt(volume)}</div></div>
     <button class="iconbtn" data-act="add-ex-workout">＋</button>
     <button class="iconbtn" data-act="workout-menu">⋯</button></div>`;
 
@@ -1210,13 +1243,13 @@ function screenActiveWorkout(w){
     if(s.is_completed)
       return `<div class="setrow done" data-act="set-menu" data-v="${s.id}" style="margin-bottom:10px">
         <div class="badge ok">${s.set_number}</div>
-        <div class="grow b7 nums" style="font-size:17px">${num(s.weight)} kg × ${s.reps}${
+        <div class="grow b7 nums" style="font-size:17px">${wnum(s.weight)} ${unitW()} × ${s.reps}${
           s.rpe ? `<span class="muted small" style="font-weight:500"> · RPE ${num(s.rpe)}</span>` : ''}</div>
         <div style="color:var(--accent)">✓</div></div>`;
     if(i !== nextIdx)
       return `<div class="setrow pending" style="margin-bottom:10px">
         <div class="badge">${s.set_number}</div>
-        <div class="grow nums b7">${num(s.weight)} kg × ${s.reps}</div>
+        <div class="grow nums b7">${wnum(s.weight)} ${unitW()} × ${s.reps}</div>
         <button class="iconbtn" data-act="del-set" data-v="${s.id}">✕</button></div>`;
     return `<div class="card solid" id="active-set" style="margin-bottom:10px">
       <div class="row" style="margin-bottom:10px">
@@ -1224,7 +1257,7 @@ function screenActiveWorkout(w){
         <div class="grow b8" style="font-size:12px;letter-spacing:1.2px">SERIE ${s.set_number}</div>
         <button class="iconbtn" data-act="del-set" data-v="${s.id}">🗑</button></div>
       <div class="grid2">
-        ${stepper('in-w','Peso', s.weight, {step:2.5, unit:'kg', decimals:true, max:1000})}
+        ${stepper('in-w','Peso', kgToUnit(s.weight), {step:wStep(), unit:unitW(), decimals:true, max:wMax()})}
         ${stepper('in-r','Reps', s.reps, {step:1, min:1, max:200})}
       </div>
       <div style="height:14px"></div>
@@ -1238,7 +1271,7 @@ function screenActiveWorkout(w){
     <h2 style="font-size:26px;font-weight:800;letter-spacing:-1px;line-height:1.15">${esc(we.exercise_name)}</h2>
     <div class="wrap" style="margin:8px 0 18px">
       <span class="chip on">Objetivo: ${we.target_sets} × ${we.target_reps}</span>
-      ${we.target_weight ? `<span class="chip">${kg(we.target_weight)}</span>` : ''}
+      ${we.target_weight ? `<span class="chip">${wt(we.target_weight)}</span>` : ''}
       <span class="chip">${we.rest_seconds}s descanso</span>
     </div>
     ${sets}
@@ -1319,7 +1352,7 @@ function screenDay(dayId){
         <span class="chip on">${e.target_sets} series</span>
         <span class="chip">${e.target_reps_max && e.target_reps_max !== e.target_reps
           ? e.target_reps+'-'+e.target_reps_max : e.target_reps} reps</span>
-        ${e.target_weight ? `<span class="chip">${kg(e.target_weight)}</span>` : ''}
+        ${e.target_weight ? `<span class="chip">${wt(e.target_weight)}</span>` : ''}
         <span class="chip">${e.rest_seconds}s descanso</span>
         ${e.target_rpe ? `<span class="chip">RPE ${num(e.target_rpe)}</span>` : ''}
       </div>
@@ -1343,25 +1376,25 @@ function screenProgress(){
     <div class="card">${barChart(vol.map(p => ({label:fmtShort(+p.date), value:p.value})))}</div>
     <div class="eyebrow">Esta semana</div>
     <div class="grid2">
-      ${statTile('Volumen', kg(w.volume), true)}${statTile('Entrenamientos', w.workouts)}
+      ${statTile('Volumen', wt(w.volume), true)}${statTile('Entrenamientos', w.workouts)}
       ${statTile('Series', w.sets)}${statTile('Tiempo', fmtDur(w.seconds))}
     </div>
     <div class="eyebrow">Este mes</div>
     <div class="grid2">
-      ${statTile('Volumen mensual', kg(m.volume))}${statTile('Entrenamientos', m.workouts)}
+      ${statTile('Volumen mensual', wt(m.volume))}${statTile('Entrenamientos', m.workouts)}
     </div>
     <div class="eyebrow">Histórico</div>
     <div class="grid2">
       ${statTile('Entrenamientos', a.workouts)}${statTile('Series realizadas', a.sets)}
-      ${statTile('Peso máximo', kg(a.maxWeight))}${statTile('Reps máximas', a.maxReps)}
-      ${statTile('Volumen total', kg(a.volume))}${statTile('Tiempo entrenado', fmtDur(a.seconds))}
+      ${statTile('Peso máximo', wt(a.maxWeight))}${statTile('Reps máximas', a.maxReps)}
+      ${statTile('Volumen total', wt(a.volume))}${statTile('Tiempo entrenado', fmtDur(a.seconds))}
     </div>
     ${records.length ? `<div class="eyebrow">Récords personales</div>${records.map(r => `
       <div class="card"><div class="row"><div>🏆</div>
         <div class="grow"><div class="b7">${esc(r.exercise_name)}</div>
         <div class="tiny muted">${PR_LABEL[r.record_type]} · ${fmtDate(r.achieved_at)}</div></div>
         <div class="b8 nums" style="color:var(--accent)">${
-          r.record_type === 'max_1rm' ? num(r.value)+' kg' : num(r.weight)+' kg × '+r.reps}</div>
+          r.record_type === 'max_1rm' ? wnum(r.value)+' '+unitW() : wnum(r.weight)+' '+unitW()+' × '+r.reps}</div>
       </div></div>`).join('')}` : ''}
     <p class="tiny muted" style="margin-top:18px">El 1RM es una estimación (fórmula de Epley)
       usada solo como referencia de progreso. No es un valor médico ni exacto.</p>
@@ -1414,7 +1447,9 @@ function screenExercise(id){
   const records = WorkoutRepo.recordsFor(id);
   const metric = state.metric;
   const chartPoints = points.map(p => ({label:fmtShort(+p.date),
-    value: metric === 'weight' ? p.maxWeight : metric === 'reps' ? p.maxReps : p.volume}));
+    value: metric === 'weight' ? kgToUnit(p.maxWeight)
+         : metric === 'reps'   ? p.maxReps
+         : kgToUnit(p.volume)}));
 
   return `<div class="topbar"><button class="iconbtn" data-act="back">←</button>
     <div class="grow"><h1 style="font-size:20px">${esc(e.name)}</h1></div>
@@ -1426,7 +1461,7 @@ function screenExercise(id){
     ${records.length ? `<div class="eyebrow">Récords personales</div>${records.map(r => `
       <div class="card"><div class="row"><div class="grow small">${PR_LABEL[r.record_type]}</div>
       <div class="b8 nums" style="color:var(--accent)">${
-        r.record_type === 'max_1rm' ? num(r.value)+' kg' : num(r.weight)+' kg × '+r.reps}</div></div></div>`).join('')}` : ''}
+        r.record_type === 'max_1rm' ? wnum(r.value)+' '+unitW() : wnum(r.weight)+' '+unitW()+' × '+r.reps}</div></div></div>`).join('')}` : ''}
     <div class="eyebrow">Evolución</div>
     <div class="hscroll flush" style="padding-bottom:12px">
       ${[['weight','Peso'],['reps','Reps'],['volume','Volumen']].map(([k,l]) =>
@@ -1435,9 +1470,9 @@ function screenExercise(id){
     <div class="eyebrow">Últimos entrenamientos</div>
     ${sessions.length ? sessions.map(s => `<div class="card">
       <div class="row"><div class="grow b7 small ell">${fmtDate(s.date)}</div>
-        <div class="tiny muted nums">${kg(s.volume)} · 1RM ~${num(epley(s.bestWeight,s.bestReps))} kg</div></div>
+        <div class="tiny muted nums">${wt(s.volume)} · 1RM ~${wnum(epley(s.bestWeight,s.bestReps))} ${unitW()}</div></div>
       <div class="wrap" style="margin-top:9px">${s.sets.map(x =>
-        `<span class="chip">${num(x.weight)} × ${x.reps}</span>`).join('')}</div></div>`).join('')
+        `<span class="chip">${wnum(x.weight)} × ${x.reps}</span>`).join('')}</div></div>`).join('')
     : empty('🕓','Sin registros todavía','Cuando entrenes este ejercicio aparecerá aquí.')}
   </div>`;
 }
@@ -1452,7 +1487,7 @@ function screenHistory(){
         <div class="b7" style="font-size:17px;margin-top:3px">${esc(w.title)}</div>
         <div class="wrap" style="margin-top:8px">
           <span class="chip">${fmtDur(w.duration_seconds)}</span>
-          <span class="chip on">${kg(w.total_volume)}</span></div>
+          <span class="chip on">${wt(w.total_volume)}</span></div>
       </div><div class="muted">›</div></div></div>`).join('')
     : empty('🕓','Todavía no hay entrenamientos','Cuando finalices tu primera sesión aparecerá aquí.')}
   </div>`;
@@ -1468,13 +1503,13 @@ function screenWorkout(id){
     <button class="iconbtn" data-act="del-workout" data-v="${id}">🗑</button></div>
   <div class="screen">
     <div class="grid2">${statTile('Duración', fmtDur(w.duration_seconds))}
-      ${statTile('Volumen', kg(w.total_volume), true)}</div>
+      ${statTile('Volumen', wt(w.total_volume), true)}</div>
     <div class="eyebrow">Lo que hiciste</div>
     ${groups.map(g => `<div class="card">
       <div class="b7" style="font-size:16px">${esc(g.exercise.exercise_name)}</div>
       <div style="margin-top:10px">${g.sets.map(s => `<div class="row" style="margin-bottom:6px">
         <div class="tiny muted" style="width:22px">${s.set_number}</div>
-        <div class="grow b7 nums">${num(s.weight)} × ${s.reps}</div>
+        <div class="grow b7 nums">${wnum(s.weight)} × ${s.reps}</div>
         ${s.rpe ? `<div class="tiny muted">RPE ${num(s.rpe)}</div>` : ''}</div>`).join('')}</div>
     </div>`).join('')}
     <p class="tiny muted" style="margin-top:16px">Este registro es inmutable: refleja exactamente
@@ -1485,9 +1520,12 @@ function screenWorkout(id){
 function screenMeasures(){
   const list = MeasureRepo.all();
   const points = list.filter(m => m.body_weight).reverse()
-    .map(m => ({label:fmtShort(m.measured_at), value:m.body_weight}));
-  const FIELDS = [['body_weight','Peso','kg'],['body_fat','Grasa','%'],['chest','Pecho','cm'],
-    ['waist','Cintura','cm'],['arm','Brazo','cm'],['thigh','Muslo','cm'],['calf','Pantorrilla','cm']];
+    .map(m => ({label:fmtShort(m.measured_at), value:kgToUnit(m.body_weight)}));
+  // [clave, etiqueta, unidad, conversión]
+  const FIELDS = [['body_weight','Peso',unitW(),kgToUnit],['body_fat','Grasa','%',v=>v],
+    ['chest','Pecho',unitL(),cmToUnit],['waist','Cintura',unitL(),cmToUnit],
+    ['arm','Brazo',unitL(),cmToUnit],['thigh','Muslo',unitL(),cmToUnit],
+    ['calf','Pantorrilla',unitL(),cmToUnit]];
   return `<div class="topbar"><button class="iconbtn" data-act="back">←</button><h1>Medidas</h1></div>
   <div class="screen">${
     list.length ? `<div class="eyebrow" style="margin-top:6px">Peso corporal</div>
@@ -1497,7 +1535,7 @@ function screenMeasures(){
         <div class="row"><div class="grow b7 small ell">${fmtDate(m.measured_at)}</div>
           <button class="iconbtn" data-act="del-measure" data-v="${m.id}">🗑</button></div>
         <div class="wrap" style="margin-top:6px">${FIELDS.filter(([k]) => m[k] != null && m[k] !== '')
-          .map(([k,l,u]) => `<span class="chip">${l} ${num(m[k])} ${u}</span>`).join('')}</div>
+          .map(([k,l,u,conv]) => `<span class="chip">${l} ${num(Math.round(conv(m[k])*10)/10)} ${u}</span>`).join('')}</div>
       </div>`).join('')}`
     : empty('📏','Sin medidas registradas','Registra peso corporal y medidas para ver tu evolución.')}
   </div>
@@ -1513,6 +1551,17 @@ function screenSettings(){
       ${[['dark','Oscuro'],['light','Claro'],['system','Sistema']].map(([k,l]) =>
         `<button class="pill${s.theme===k?' on':''}" data-act="theme" data-v="${k}">${l}</button>`).join('')}
     </div></div>
+    <div class="eyebrow">Unidades</div>
+    <div class="card">
+      <div class="hscroll flush" style="margin-bottom:10px">
+        ${[['lb','Libras (lb)'],['kg','Kilos (kg)']].map(([k,l]) =>
+          `<button class="pill${unitW()===k?' on':''}" data-act="unit" data-v="${k}">${l}</button>`).join('')}
+      </div>
+      <p class="small muted" style="margin:0">Cambia cómo se muestran y se escriben los pesos.
+        Internamente todo se guarda igual, así que puedes alternar cuando quieras sin alterar tu
+        historial ni tus récords. Las medidas corporales acompañan a la elección:
+        ${unitW()==='lb' ? 'libras y pulgadas' : 'kilos y centímetros'}.</p>
+    </div>
     <div class="eyebrow">Temporizador</div>
     <div class="card">
       <div class="row" style="padding:6px 0"><div class="grow">Sonido al terminar</div>
@@ -1707,7 +1756,8 @@ document.addEventListener('click', async ev => {
   /* --- sesión activa --- */
   case 'wtab': state.workoutTab = Number(v); render(); break;
   case 'complete-set': {
-    const records = WorkoutRepo.completeSet(Number(v), readNum('in-w'), Math.round(readNum('in-r')), readNum('in-rpe'));
+    const records = WorkoutRepo.completeSet(Number(v), unitToKg(readNum('in-w')),
+      Math.round(readNum('in-r')), readNum('in-rpe'));
     const rest = Number(el.dataset.rest) || db().settings.defaultRest;
     timer.start(rest);
     if(navigator.vibrate) navigator.vibrate(25);
@@ -1774,7 +1824,7 @@ document.addEventListener('click', async ev => {
       <p class="small muted" style="margin:-8px 0 16px">${esc(done.title)} · ${fmtDate(done.started_at)}</p>
       <div class="grid2">${statTile('Duración', fmtDur(done.duration_seconds), true)}
         ${statTile('Ejercicios', groups.length)}${statTile('Series', sets)}
-        ${statTile('Volumen', kg(done.total_volume))}</div>
+        ${statTile('Volumen', wt(done.total_volume))}</div>
       ${prs ? `<div class="card solid" style="margin-top:10px"><div class="row"><div>🏆</div>
         <div class="grow b7 small">${prs === 1 ? '1 récord personal' : prs+' récords personales'} en esta sesión</div>
         </div></div>` : ''}
@@ -1907,7 +1957,7 @@ document.addEventListener('click', async ev => {
       target_sets: Math.round(readNum('cfg-sets')),
       target_reps: Math.round(readNum('cfg-reps')),
       target_reps_max: Math.round(readNum('cfg-repsmax')) || null,
-      target_weight: readNum('cfg-weight'),
+      target_weight: unitToKg(readNum('cfg-weight')),
       rest_seconds: Math.round(readNum('cfg-rest')),
       target_rpe: readNum('cfg-rpe'),
       notes: $('#cfg-notes').value.trim()
@@ -1947,8 +1997,13 @@ document.addEventListener('click', async ev => {
       const n = parseFloat(String(el.value).replace(',','.')); return isNaN(n) ? null : n; };
     MeasureRepo.create({
       measured_at: +new Date($('#m-date').value || new Date()),
-      body_weight:val('m-weight'), body_fat:val('m-fat'), chest:val('m-chest'),
-      waist:val('m-waist'), arm:val('m-arm'), thigh:val('m-thigh'), calf:val('m-calf'), notes:''
+      body_weight: val('m-weight') === null ? null : unitToKg(val('m-weight')),
+      body_fat: val('m-fat'),
+      chest: val('m-chest') === null ? null : unitToCm(val('m-chest')),
+      waist: val('m-waist') === null ? null : unitToCm(val('m-waist')),
+      arm: val('m-arm') === null ? null : unitToCm(val('m-arm')),
+      thigh: val('m-thigh') === null ? null : unitToCm(val('m-thigh')),
+      calf: val('m-calf') === null ? null : unitToCm(val('m-calf')), notes:''
     });
     closeLayer(); render();
     break;
@@ -1957,6 +2012,10 @@ document.addEventListener('click', async ev => {
 
   /* --- configuración --- */
   case 'theme': db().settings.theme = v; save(); applyTheme(); render(); break;
+  case 'unit':
+    db().settings.unit = v; save(); render();
+    toast(v === 'lb' ? 'Pesos en libras' : 'Pesos en kilos', true);
+    break;
   case 'toggle': db().settings[v] = !db().settings[v]; save(); render(); break;
   case 'default-rest': {
     const r = await promptDialog('Descanso por defecto (segundos)', String(db().settings.defaultRest), {numeric:true});
@@ -2041,7 +2100,7 @@ function configExerciseSheet(id){
     </div><div style="height:14px"></div>
     <div class="grid2">
       ${stepper('cfg-repsmax','Rango máx.', e.target_reps_max || e.target_reps, {min:0, max:100})}
-      ${stepper('cfg-weight','Peso', e.target_weight, {step:2.5, unit:'kg', decimals:true, max:1000})}
+      ${stepper('cfg-weight','Peso', kgToUnit(e.target_weight), {step:wStep(), unit:unitW(), decimals:true, max:wMax()})}
     </div><div style="height:14px"></div>
     <div class="grid2">
       ${stepper('cfg-rest','Descanso', e.rest_seconds, {step:15, min:0, max:600, unit:'s'})}
@@ -2073,16 +2132,17 @@ function exerciseFormSheet(id){
 
 function measureSheet(){
   const today = new Date().toISOString().slice(0,10);
+  const L = unitL();
   const field = (id,label,unit) => `<label class="f"><span>${label} (${unit})</span>
     <input class="t" id="${id}" inputmode="decimal"></label>`;
   sheet(`<h3>Nueva medición</h3>
     <label class="f"><span>Fecha</span><input class="t" type="date" id="m-date" value="${today}"></label>
     <div class="grid2">
-      ${field('m-weight','Peso corporal','kg')}${field('m-fat','Grasa corporal','%')}
-      ${field('m-chest','Pecho','cm')}${field('m-waist','Cintura','cm')}
-      ${field('m-arm','Brazo','cm')}${field('m-thigh','Muslo','cm')}
+      ${field('m-weight','Peso corporal',unitW())}${field('m-fat','Grasa corporal','%')}
+      ${field('m-chest','Pecho',L)}${field('m-waist','Cintura',L)}
+      ${field('m-arm','Brazo',L)}${field('m-thigh','Muslo',L)}
     </div>
-    ${field('m-calf','Pantorrilla','cm')}
+    ${field('m-calf','Pantorrilla',L)}
     <button class="btn" data-act="save-measure">GUARDAR</button>`);
 }
 
